@@ -1,0 +1,95 @@
+@import "tailwindcss";
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap');
+
+/* Griun Mongtori (그리운 몽토리체) Webfont */
+@font-face {
+  font-family: 'Griun Mongtori';
+  src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/2601-1@1.0/Griun_Mongtori-Rg.woff2') format('woff2');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'GriunMongtori';
+  src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/2601-1@1.0/Griun_Mongtori-Rg.woff2') format('woff2');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@layer base {
+  body {
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue', 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+    background-color: #FAF9FB;
+    color: #1F1735;
+  }
+
+  /* Pawty and Draw Your Own Cat font */
+  .font-mongtori {
+    font-family: 'Griun Mongtori', 'GriunMongtori', cursive, sans-serif;
+  }
+
+  /* Diary writing text font */
+  .font-mono,
+  .font-diary {
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  /* Everything else: Pretendard */
+  .font-sans,
+  .font-sans-clean,
+  .font-pretendard {
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+  }
+}
+
+/* Pawty Dot Grid in Soft Plum Purple */
+.dot-grid {
+  background-color: #FAF9FB;
+  background-image: radial-gradient(#B89EB8 1.15px, transparent 1.15px);
+  background-size: 20px 20px;
+  background-position: 10px 10px;
+}
+
+.dot-grid-subtle {
+  background-color: #FAF9FB;
+  background-image: radial-gradient(#D2C3D2 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+/* Custom discreet plum scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #D2C3D2;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #7D4C7D;
+}
+
+/* Floating aesthetic animations */
+@keyframes floatGentle {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-3px); }
+}
+
+.animate-float {
+  animation: floatGentle 3s ease-in-out infinite;
+}
+
+@keyframes pulseGlow {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+}
+
+.animate-pulse-soft {
+  animation: pulseGlow 2.5s ease-in-out infinite;
+}

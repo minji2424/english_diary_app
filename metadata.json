@@ -1,0 +1,6 @@
+{
+  "name": "NativeInk - 원어민 영어 일기 & AI 첨삭",
+  "description": "영어로 일기를 쓰고 실시간 원어민 수준 문장 교정과 콩글리시 탈출 팁, 상세 문법 및 관용 표현 피드백을 제공하는 스마트 영어 일기 앱",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
