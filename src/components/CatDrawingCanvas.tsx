@@ -23,6 +23,7 @@ export const CatDrawingCanvas: React.FC<CatDrawingCanvasProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [tool, setTool] = useState<'pen' | 'eraser'>('pen');
+  const [penColor, setPenColor] = useState('#583973');
   const [hasDrawnSomething, setHasDrawnSomething] = useState(Boolean(initialDrawing));
   const [selectedPreset, setSelectedPreset] = useState<CatId | null>(initialCatId || null);
   const [history, setHistory] = useState<ImageData[]>([]);
@@ -119,11 +120,11 @@ export const CatDrawingCanvas: React.FC<CatDrawingCanvasProps> = ({
 
     if (tool === 'eraser') {
       ctx.globalCompositeOperation = 'destination-out';
-      ctx.lineWidth = 16;
+      ctx.lineWidth = 20;
     } else {
       ctx.globalCompositeOperation = 'source-over';
-      ctx.strokeStyle = '#583973';
-      ctx.lineWidth = 3.5;
+      ctx.strokeStyle = penColor;
+      ctx.lineWidth = 8;
     }
 
     ctx.lineTo(x, y);
@@ -271,10 +272,14 @@ export const CatDrawingCanvas: React.FC<CatDrawingCanvasProps> = ({
             <Eraser className="w-5 h-5 stroke-[2]" />
           </button>
 
-          {/* Solid Purple Circle */}
-          <div
-            className="w-5 h-5 rounded-full bg-[#583973] shadow-xs"
-            title="펜 색상"
+          <input
+            type="color"
+            value={penColor}
+            onChange={(event) => setPenColor(event.target.value)}
+            aria-label="펜 색상 변경"
+            title="펜 색상 변경"
+            disabled={tool === 'eraser'}
+            className="w-7 h-7 rounded-full border-0 bg-transparent cursor-pointer disabled:opacity-40"
           />
         </div>
 

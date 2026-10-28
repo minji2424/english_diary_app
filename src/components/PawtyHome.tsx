@@ -22,31 +22,22 @@ export const PawtyHome: React.FC<PawtyHomeProps> = ({
   onNewDiary,
   onOpenVault,
 }) => {
-  // 1-Year Calendar State (default 2026)
-  const [year, setYear] = useState<number>(currentYearMonth?.year || 2026);
+  const today = new Date();
+  const [localYearMonth, setLocalYearMonth] = useState(() => ({
+    year: today.getFullYear(),
+    month: today.getMonth() + 1,
+  }));
+  const year = currentYearMonth?.year ?? localYearMonth.year;
+  const month = currentYearMonth?.month ?? localYearMonth.month;
+  const [activeDate, setActiveDate] = useState<string>(() =>
+    `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+  );
 
-  // Active hover/selected date tooltip (default showing 2026-10-25 matching main.png)
-  const [activeDate, setActiveDate] = useState<string>('2026-10-25');
-
-  // Synchronize year if parent passes yearMonth
-  React.useEffect(() => {
-    if (currentYearMonth) {
-      setYear(currentYearMonth.year);
-    }
-  }, [currentYearMonth]);
-
-  // Navigate to previous year
-  const handlePrevYear = () => {
-    const nextY = year - 1;
-    setYear(nextY);
-    onYearMonthChange?.(nextY, currentYearMonth?.month || 10);
-  };
-
-  // Navigate to next year
-  const handleNextYear = () => {
-    const nextY = year + 1;
-    setYear(nextY);
-    onYearMonthChange?.(nextY, currentYearMonth?.month || 10);
+  const changeMonth = (delta: number) => {
+    const next = new Date(year, month - 1 + delta, 1);
+    setLocalYearMonth({ year: next.getFullYear(), month: next.getMonth() + 1 });
+    onYearMonthChange?.(next.getFullYear(), next.getMonth() + 1);
+    setActiveDate(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-01`);
   };
 
   // Fast lookup by date string: "YYYY-MM-DD"
@@ -77,10 +68,13 @@ export const PawtyHome: React.FC<PawtyHomeProps> = ({
     }
   };
 
-  // 12 months array (1 to 12)
-  const months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-  // 31 days array (1 to 31)
-  const days = Array.from({ length: 31 }, (_, i) => i + 1);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const firstWeekday = new Date(year, month - 1, 1).getDay();
+  const calendarCells = [
+    ...Array.from({ length: firstWeekday }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, index) => index + 1),
+  ];
+  while (calendarCells.length % 7 !== 0) calendarCells.push(null);
 
   // Subtle organic doodle jitter for empty dots (살짝 삐뚤빼뚤 귀엽게)
   const getDotJitter = (day: number, month: number) => {
@@ -112,109 +106,101 @@ export const PawtyHome: React.FC<PawtyHomeProps> = ({
         </button>
       </div>
 
-      {/* Year Selector (< 2026 >) matching main.png */}
+      {/* Month selector */}
       <div className="flex items-center justify-center gap-3 py-2 w-full">
         <button
-          onClick={handlePrevYear}
+          onClick={() => changeMonth(-1)}
           className="text-[#B89EB8] hover:text-[#7D4C7D] transition-colors p-1 cursor-pointer"
-          aria-label="이전 해"
-          title="이전 해"
+          aria-label="이전 달"
+          title="이전 달"
         >
           <ChevronLeft className="w-3.5 h-3.5 stroke-[2.5]" />
         </button>
 
         <span className="bg-[#7D4C7D] text-white text-xs sm:text-[13px] font-sans font-medium px-5 py-1 rounded-full shadow-xs tracking-wider">
-          {year}
+          {year}년 {month}월
         </span>
 
         <button
-          onClick={handleNextYear}
+          onClick={() => changeMonth(1)}
           className="text-[#B89EB8] hover:text-[#7D4C7D] transition-colors p-1 cursor-pointer"
-          aria-label="다음 해"
-          title="다음 해"
+          aria-label="다음 달"
+          title="다음 달"
         >
           <ChevronRight className="w-3.5 h-3.5 stroke-[2.5]" />
         </button>
       </div>
 
-      {/* 12-Column x 31-Row Year Dot Matrix matching main.png exactly */}
+      {/* Monthly calendar: dates flow left to right, then top to bottom */}
       <div className="w-full flex-1 flex flex-col items-center justify-start pt-2 pb-24">
-        <div className="grid grid-cols-12 gap-x-1 sm:gap-x-1.5 gap-y-1 sm:gap-y-1.5 place-items-center w-full max-w-[420px] mx-auto">
-          {days.map((dayNum) => (
-            <React.Fragment key={`day-row-${dayNum}`}>
-              {months.map((monthNum) => {
-                const daysInMonth = new Date(year, monthNum, 0).getDate();
-                if (dayNum > daysInMonth) {
-                  // Non-existent day in month (e.g. Feb 30, 31)
-                  return <div key={`${monthNum}-${dayNum}`} className="w-7 h-7 sm:w-8 sm:h-8" />;
-                }
+        <div className="w-full max-w-[420px]">
+          <div className="grid grid-cols-7 place-items-center mb-1 text-[10px] font-sans text-[#A892B1]">
+            {['일', '월', '화', '수', '목', '금', '토'].map((day) => <span key={day}>{day}</span>)}
+          </div>
+          <div className="grid grid-cols-7 gap-x-1 sm:gap-x-1.5 gap-y-1 sm:gap-y-1.5 place-items-center w-full mx-auto">
+            {calendarCells.map((dayNum, index) => {
+              if (dayNum === null) return <div key={`empty-${index}`} className="w-9 h-9 sm:w-10 sm:h-10" />;
+              const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+              const diary = diaryByDate.get(dateStr);
+              const hasDiary = Boolean(diary);
+              const isSelected = activeDate === dateStr;
 
-                const dateStr = `${year}-${String(monthNum).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
-                const diary = diaryByDate.get(dateStr);
-                const hasDiary = Boolean(diary);
-                const isSelected = activeDate === dateStr;
-
-                // 1. Day with Diary: Render Cat Artwork
-                if (hasDiary && diary) {
-                  return (
-                    <div
-                      key={dateStr}
-                      onClick={() => onSelectDiary(diary)}
-                      onMouseEnter={() => setActiveDate(dateStr)}
-                      className="relative flex items-center justify-center w-7 h-7 sm:w-8 sm:h-8 cursor-pointer group"
-                      title={`${dateStr}: ${diary.originalTitle || '고양이 일기'}`}
-                    >
-                      {/* Teal Tooltip Pill matching main.png: e.g. "sunday, 25.10" */}
-                      {isSelected && (
-                        <div className="absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap bg-[#59A8B0] text-white text-[9px] sm:text-[10px] font-sans px-2.5 py-0.5 rounded-full shadow-md z-30 pointer-events-none">
-                          {formatDatePill(dateStr)}
-                        </div>
-                      )}
-
-                      <div className="w-full h-full flex items-center justify-center transition-transform group-hover:scale-125">
-                        {diary.customDrawingUrl ? (
-                          <img
-                            src={diary.customDrawingUrl}
-                            alt="Cat"
-                            className="w-full h-full object-contain pointer-events-none select-none drop-shadow-xs"
-                          />
-                        ) : (
-                          <CatIcon name={diary.catId || 'momo'} size={28} className="w-full h-full object-contain" />
-                        )}
-                      </div>
-                    </div>
-                  );
-                }
-
-                // 2. Empty Day: Render Clean Plum Dot
-                const jitter = getDotJitter(dayNum, monthNum);
+              if (hasDiary && diary) {
                 return (
-                  <button
+                  <div
                     key={dateStr}
-                    type="button"
-                    onClick={() => onNewDiary(dateStr)}
+                    onClick={() => onSelectDiary(diary)}
                     onMouseEnter={() => setActiveDate(dateStr)}
-                    className="relative flex items-center justify-center w-7 h-7 sm:w-8 sm:h-8 group cursor-pointer"
-                    title={`${dateStr} 일기 쓰기`}
+                    className="relative flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10 cursor-pointer group"
+                    title={`${dateStr}: ${diary.originalTitle || '고양이 일기'}`}
                   >
-                    {/* Tooltip on hover/active */}
                     {isSelected && (
                       <div className="absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap bg-[#59A8B0] text-white text-[9px] sm:text-[10px] font-sans px-2.5 py-0.5 rounded-full shadow-md z-30 pointer-events-none">
                         {formatDatePill(dateStr)}
                       </div>
                     )}
 
-                    <span
-                      className="w-1.5 h-1.5 rounded-full bg-[#7D4C7D] transition-transform group-hover:scale-150"
-                      style={{
-                        transform: `translate(${jitter.dx.toFixed(2)}px, ${jitter.dy.toFixed(2)}px) scale(${jitter.scale.toFixed(2)})`,
-                      }}
-                    />
-                  </button>
+                    <div className="w-full h-full flex items-center justify-center transition-transform group-hover:scale-125">
+                      {diary.customDrawingUrl ? (
+                        <img
+                          src={diary.customDrawingUrl}
+                          alt="Cat"
+                          className="w-full h-full object-contain pointer-events-none select-none drop-shadow-xs"
+                        />
+                      ) : (
+                        <CatIcon name={diary.catId || 'momo'} size={28} className="w-full h-full object-contain" />
+                      )}
+                    </div>
+                  </div>
                 );
-              })}
-            </React.Fragment>
-          ))}
+              }
+
+              const jitter = getDotJitter(dayNum, month);
+              return (
+                <button
+                  key={dateStr}
+                  type="button"
+                  onClick={() => onNewDiary(dateStr)}
+                  onMouseEnter={() => setActiveDate(dateStr)}
+                  className="relative flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10 group cursor-pointer"
+                  title={`${dateStr} 일기 쓰기`}
+                >
+                  {isSelected && (
+                    <div className="absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap bg-[#59A8B0] text-white text-[9px] sm:text-[10px] font-sans px-2.5 py-0.5 rounded-full shadow-md z-30 pointer-events-none">
+                      {formatDatePill(dateStr)}
+                    </div>
+                  )}
+
+                  <span
+                    className="w-1.5 h-1.5 rounded-full bg-[#7D4C7D] transition-transform group-hover:scale-150"
+                    style={{
+                      transform: `translate(${jitter.dx.toFixed(2)}px, ${jitter.dy.toFixed(2)}px) scale(${jitter.scale.toFixed(2)})`,
+                    }}
+                  />
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -223,7 +209,8 @@ export const PawtyHome: React.FC<PawtyHomeProps> = ({
         activeTab="home"
         onGoHome={() => {}}
         onGoDiary={() => {
-          const todayStr = '2026-10-26';
+          const now = new Date();
+          const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
           const existing = diaryByDate.get(todayStr);
           if (existing) {
             onSelectDiary(existing);

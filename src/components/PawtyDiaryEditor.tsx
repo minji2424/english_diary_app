@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
-import { ChevronLeft, Image as ImageIcon, Sparkles, Bookmark, BookmarkCheck, Loader2 } from 'lucide-react';
-import { WeatherType, MoodType, CatId, SentenceBreakdown } from '../types/diary';
+import React, { useState, useRef, useEffect } from 'react';
+import { ChevronLeft, Image as ImageIcon, Sparkles, Bookmark, Loader2, X } from 'lucide-react';
+import { WeatherType, MoodType, CatId, SentenceBreakdown, CorrectionResult } from '../types/diary';
 import { CatDrawingCanvas } from './CatDrawingCanvas';
 import { CatIcon } from './CatIcons';
 
@@ -15,8 +15,10 @@ interface PawtyDiaryEditorProps {
   initialPhotoUrl?: string;
   initialPhotoUrls?: string[];
   initialBreakdowns?: SentenceBreakdown[];
+  initialCorrectionResult?: CorrectionResult;
   initialMode?: 'original' | 'feedback';
   onBack: () => void;
+  onExpressionBookmark?: (breakdown: SentenceBreakdown, shouldSave: boolean) => void;
   onSaveDirect: (data: {
     title: string;
     content: string;
@@ -30,13 +32,17 @@ interface PawtyDiaryEditorProps {
     photoUrl?: string;
     photoUrls?: string[];
     savedBreakdowns?: SentenceBreakdown[];
+    correctionResult?: CorrectionResult;
   }) => void;
 }
 
 export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
   initialTitle = '',
   initialContent = '',
-  initialDate = '2026.10.26',
+  initialDate = (() => {
+    const today = new Date();
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  })(),
   initialWeather = 'sunny',
   initialMood = 'peaceful',
   initialCatId = 'momo',
@@ -44,8 +50,10 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
   initialPhotoUrl,
   initialPhotoUrls,
   initialBreakdowns,
+  initialCorrectionResult,
   initialMode = 'original',
   onBack,
+  onExpressionBookmark,
   onSaveDirect,
 }) => {
   const [content, setContent] = useState<string>(initialContent || '');
@@ -68,29 +76,15 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
   // Feedback breakdowns
   const [breakdowns, setBreakdowns] = useState<SentenceBreakdown[]>(() => {
     if (initialBreakdowns && initialBreakdowns.length > 0) return initialBreakdowns;
-    return [
-      {
-        original: 'I felt comfort',
-        corrected: 'I felt at ease',
-        koreanExplanation: "마음이 편안했다면 'at ease'가 잘 어울려요. 'comfort'는 감정을 나타내는 명사예요.",
-        categoryTag: '감정을 표현하는 말',
-        konglishAlert: '',
-        betterAlternativeWords: [],
-      },
-      {
-        original: "didn't notice the time",
-        corrected: 'lost track of time',
-        koreanExplanation: '즐거워서 시간 가는 줄 몰랐을 때 쓰는 표현이에요. 원래 문장의 따뜻한 느낌도 그대로예요.',
-        categoryTag: '일상에서 자주 쓰는 표현',
-        konglishAlert: '',
-        betterAlternativeWords: [],
-      },
-    ];
+    return [];
   });
+  const [correctionResult, setCorrectionResult] = useState<CorrectionResult | null>(
+    initialCorrectionResult || null
+  );
 
-  // User-saved expressions for Expression Vault (first one saved by default matching AI_FEEDBACK_676a2998.png)
-  const [savedBreakdownIndices, setSavedBreakdownIndices] = useState<Set<number>>(new Set([0]));
+  const [savedBreakdownIndices, setSavedBreakdownIndices] = useState<Set<number>>(new Set<number>());
   const [isGeneratingFeedback, setIsGeneratingFeedback] = useState<boolean>(false);
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
   const [showDrawingModal, setShowDrawingModal] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -101,7 +95,74 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
     setTimeout(() => setToastMessage(null), 2500);
   };
 
-  // Format date as 2026.10.26
+  useEffect(() => {
+    const currentText = content.trim();
+    if (!currentText) {
+      setBreakdowns([]);
+      setCorrectionResult(null);
+      setFeedbackError(null);
+      setIsGeneratingFeedback(false);
+      return;
+    }
+
+    if (initialCorrectionResult && currentText === initialContent.trim()) {
+      setCorrectionResult(initialCorrectionResult);
+      setBreakdowns(initialCorrectionResult.sentenceBreakdowns);
+      setIsGeneratingFeedback(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setFeedbackError(null);
+    setBreakdowns([]);
+    setCorrectionResult(null);
+    setIsGeneratingFeedback(true);
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const response = await fetch('/api/correct', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: initialTitle || 'My English Diary',
+            content: currentText,
+            date,
+            weather: initialWeather,
+            mood: initialMood,
+          }),
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.details || errorData.error || 'AI 피드백을 불러오지 못했습니다.');
+        }
+
+        const data: CorrectionResult = await response.json();
+        if (!Array.isArray(data.sentenceBreakdowns)) {
+          throw new Error('AI 피드백 응답 형식이 올바르지 않습니다.');
+        }
+
+        setCorrectionResult(data);
+        setBreakdowns(data.sentenceBreakdowns);
+        setSavedBreakdownIndices(new Set<number>());
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        console.error('Failed to generate live diary feedback', error);
+        setFeedbackError(error instanceof Error ? error.message : 'AI 피드백 생성 중 오류가 발생했습니다.');
+        setCorrectionResult(null);
+        setBreakdowns([]);
+      } finally {
+        if (!controller.signal.aborted) setIsGeneratingFeedback(false);
+      }
+    }, 700);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [content, date, initialTitle, initialContent, initialCorrectionResult, initialWeather, initialMood]);
+
+  // Format the selected date as YYYY.MM.DD.
   const formattedDate = React.useMemo(() => {
     if (date.includes('.')) return date;
     const parts = date.split('-');
@@ -119,13 +180,16 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
     Array.from(files).forEach((file) => {
       const reader = new FileReader();
       reader.onload = (event) => {
-        if (event.target?.result) {
-          setPhotos((prev) => [...prev, event.target!.result as string]);
+        const result = event.target?.result;
+        if (typeof result === 'string') {
+          setPhotos((prev) => [...prev, result]);
           showToast('사진이 추가되었습니다! 📷');
         }
       };
+      reader.onerror = () => showToast('사진을 불러오지 못했습니다. 다시 시도해 주세요.');
       reader.readAsDataURL(file);
     });
+    e.currentTarget.value = '';
   };
 
   // Trigger AI Feedback (Sparkle button)
@@ -137,49 +201,20 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
     }
 
     setActiveSubView('ai_feedback');
-    setIsGeneratingFeedback(true);
-
-    try {
-      const response = await fetch('/api/correct', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: initialTitle || 'My English Diary',
-          content: currentText,
-          date,
-          weather: initialWeather,
-          mood: initialMood,
-          stamp: catId,
-          photoUrl: photos[0],
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (Array.isArray(data.sentenceBreakdowns) && data.sentenceBreakdowns.length > 0) {
-          setBreakdowns(data.sentenceBreakdowns);
-        }
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsGeneratingFeedback(false);
-    }
   };
 
   // Toggle bookmark for Expression Vault
   const handleToggleBookmark = (idx: number) => {
+    const shouldSave = !savedBreakdownIndices.has(idx);
+    const breakdown = breakdowns[idx];
     setSavedBreakdownIndices((prev) => {
       const next = new Set(prev);
-      if (next.has(idx)) {
-        next.delete(idx);
-        showToast('표현 사전 저장이 취소되었습니다.');
-      } else {
-        next.add(idx);
-        showToast('표현 사전에 저장되었습니다! 🔖');
-      }
+      if (shouldSave) next.add(idx);
+      else next.delete(idx);
       return next;
     });
+    onExpressionBookmark?.(breakdown, shouldSave);
+    showToast(shouldSave ? '표현 사전에 저장되었습니다! 🔖' : '표현 사전 저장이 취소되었습니다.');
   };
 
   // "Modify using this" button handler matching AI_FEEDBACK_676a2998.png
@@ -190,11 +225,6 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
         updatedContent = updatedContent.replace(item.original, item.corrected);
       }
     });
-
-    // If original content was empty or didn't contain target phrase, use standard sample
-    if (!updatedContent.includes('at ease')) {
-      updatedContent = `Today, I went to a small café with Jisoo. We talked about little things for two hours.\n\nI felt at ease and lost track of time.`;
-    }
 
     setContent(updatedContent);
     setActiveSubView('editor');
@@ -229,6 +259,7 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
       photoUrl: primaryPhoto,
       photoUrls: allPhotos,
       savedBreakdowns: userSavedBreakdowns,
+      correctionResult: correctionResult || undefined,
     });
   };
 
@@ -269,6 +300,14 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
               <Loader2 className="w-6 h-6 animate-spin text-[#7D4C7D]" />
               <p className="text-xs text-[#7D4C7D]">원어민 표현을 분석 중입니다... ✨</p>
             </div>
+          ) : feedbackError ? (
+            <p className="rounded-2xl bg-rose-50 px-4 py-3 text-xs leading-relaxed text-rose-800">
+              {feedbackError}
+            </p>
+          ) : breakdowns.length === 0 ? (
+            <p className="py-16 text-center text-xs text-[#9872A2]">
+              문장을 입력하면 AI 피드백이 여기에 표시됩니다.
+            </p>
           ) : (
             breakdowns.map((item, idx) => {
               const isBookmarked = savedBreakdownIndices.has(idx);
@@ -356,8 +395,8 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
         className="hidden"
       />
 
-      {/* Top Header matching write.png / write-1.png:
-          - Date: 2026.10.26
+      {/* Top Header:
+          - Selected date
           - Squircle: Before typing shows single dot; after typing shows cat! */}
       <div className="relative flex flex-col items-center pt-2 pb-3 w-full">
         {/* Back button */}
@@ -370,7 +409,7 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
           <ChevronLeft className="w-5 h-5 stroke-[2]" />
         </button>
 
-        {/* Date: 2026.10.26 */}
+        {/* Selected date */}
         <span className="text-[13px] font-sans font-medium text-[#7D4C7D] mb-2 tracking-wide">
           {formattedDate}
         </span>
@@ -410,6 +449,30 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
 
       {/* Writing Text Area matching write.png / write-1.png */}
       <div className="flex-1 flex flex-col pt-4 pb-24 w-full overflow-y-auto">
+        {photos.length > 0 && (
+          <div className="flex flex-wrap justify-center gap-3 mb-4">
+            {photos.map((photo, index) => (
+              <div
+                key={`${index}-${photo.slice(0, 32)}`}
+                className="relative w-[calc(50%-0.375rem)] max-w-[220px] overflow-hidden rounded-2xl shadow-sm animate-photo-in"
+              >
+                <img
+                  src={photo}
+                  alt={`첨부 사진 ${index + 1}`}
+                  className="w-full aspect-[4/3] object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={() => setPhotos((prev) => prev.filter((_, photoIndex) => photoIndex !== index))}
+                  aria-label={`사진 ${index + 1} 삭제`}
+                  className="absolute right-2 top-2 rounded-full bg-black/55 p-1 text-white hover:bg-black/70"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <textarea
           value={content}
           onChange={(e) => setContent(e.target.value)}

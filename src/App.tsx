@@ -36,15 +36,17 @@ export type AppView =
 export default function App() {
   const [currentView, setCurrentView] = useState<AppView>('home');
   const [editorInitialMode, setEditorInitialMode] = useState<'original' | 'feedback'>('original');
-  const [currentYearMonth, setCurrentYearMonth] = useState<{ year: number; month: number }>({
-    year: 2026,
-    month: 10,
+  const [currentYearMonth, setCurrentYearMonth] = useState<{ year: number; month: number }>(() => {
+    const today = new Date();
+    return { year: today.getFullYear(), month: today.getMonth() + 1 };
   });
   const [diaries, setDiaries] = useState<DiaryEntry[]>(() => getStoredDiaries());
   const [expressions, setExpressions] = useState<SavedExpression[]>(() => getStoredExpressions());
   const [currentDiary, setCurrentDiary] = useState<DiaryEntry | null>(() => {
     const list = getStoredDiaries();
-    return list.find((d) => d.date === '2026-10-26') || (list.length > 0 ? list[0] : null);
+    const today = new Date();
+    const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    return list.find((d) => d.date === todayString) || (list.length > 0 ? list[0] : null);
   });
   const [isCorrecting, setIsCorrecting] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -73,21 +75,20 @@ export default function App() {
   // Start new diary writing
   const handleNewDiary = (date?: string) => {
     setEditorInitialMode('original');
-    if (date) {
-      setCurrentDiary({
-        id: '',
-        date,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        weather: 'sunny',
-        mood: 'peaceful',
-        originalTitle: '',
-        originalContent: '',
-        wordCount: 0,
-      });
-    } else {
-      setCurrentDiary(null);
-    }
+    const now = new Date().toISOString();
+    const today = new Date();
+    const selectedDate = date || `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    setCurrentDiary({
+      id: `pawty-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      date: selectedDate,
+      createdAt: now,
+      updatedAt: now,
+      weather: 'sunny',
+      mood: 'peaceful',
+      originalTitle: '',
+      originalContent: '',
+      wordCount: 0,
+    });
     setCurrentView('write');
   };
 
@@ -157,7 +158,8 @@ export default function App() {
 
       let targetDiary: DiaryEntry;
 
-      if (currentDiary) {
+      const isExistingDiary = currentDiary && diaries.some((diary) => diary.id === currentDiary.id);
+      if (isExistingDiary) {
         targetDiary = {
           ...currentDiary,
           originalTitle: data.title,
@@ -203,7 +205,7 @@ export default function App() {
     } catch (err: any) {
       console.error(err);
       const fallbackDiary: DiaryEntry = {
-        id: currentDiary?.id || 'pawty-' + Date.now(),
+        id: currentDiary?.id || `pawty-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         originalTitle: data.title,
         originalContent: data.content,
         date: data.date,
@@ -276,12 +278,13 @@ export default function App() {
     photoUrl?: string;
     photoUrls?: string[];
     savedBreakdowns?: SentenceBreakdown[];
+    correctionResult?: CorrectionResult;
   }) => {
     const wordCount = data.content.trim() ? data.content.trim().split(/\s+/).length : 0;
     const now = new Date().toISOString();
 
     const entry: DiaryEntry = {
-      id: currentDiary?.id || 'pawty-' + Date.now(),
+      id: currentDiary?.id || `pawty-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       originalTitle: data.title,
       originalContent: data.content,
       date: data.date,
@@ -293,8 +296,9 @@ export default function App() {
       customDrawingUrl: data.customDrawingUrl,
       photoUrl: data.photoUrl,
       photoUrls: data.photoUrls,
+      correctionResult: data.correctionResult,
       wordCount,
-      savedWithPolish: true,
+      savedWithPolish: Boolean(data.correctionResult),
       createdAt: currentDiary?.createdAt || now,
       updatedAt: now,
     };
@@ -332,6 +336,37 @@ export default function App() {
 
     showToast('일기가 달력에 반영되었습니다! 🐾');
     setCurrentView('detail');
+  };
+
+  const handleExpressionBookmark = (breakdown: SentenceBreakdown, shouldSave: boolean) => {
+    const expression = breakdown.corrected.trim();
+    if (!expression) return;
+
+    setExpressions((prev) => {
+      if (!shouldSave) {
+        return currentDiary?.id
+          ? prev.filter((item) => !(
+              item.sourceDiaryId === currentDiary.id &&
+              item.expression.toLowerCase() === expression.toLowerCase()
+            ))
+          : prev;
+      }
+
+      if (prev.some((item) => item.expression.toLowerCase() === expression.toLowerCase())) {
+        return prev;
+      }
+
+      return [{
+        id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        expression,
+        meaning: breakdown.koreanExplanation.split('.')[0] || breakdown.koreanExplanation,
+        example: currentDiary?.originalContent || breakdown.original,
+        category: breakdown.categoryTag || 'AI 추천 표현',
+        sourceDiaryId: currentDiary?.id,
+        savedAt: (currentDiary?.date || '').replace(/-/g, '.'),
+        mastered: false,
+      }, ...prev];
+    });
   };
 
   // User selects "이 표현으로 수정하기" in Screen 4
@@ -487,9 +522,11 @@ export default function App() {
             initialPhotoUrl={currentDiary?.photoUrl}
             initialPhotoUrls={currentDiary?.photoUrls}
             initialBreakdowns={currentDiary?.correctionResult?.sentenceBreakdowns}
+            initialCorrectionResult={currentDiary?.correctionResult}
             initialMode={editorInitialMode}
-            onBack={() => setCurrentView(currentDiary && currentDiary.id ? 'detail' : 'home')}
+            onBack={() => setCurrentView(diaries.some((entry) => entry.id === currentDiary?.id) ? 'detail' : 'home')}
             onSaveDirect={handleSaveDirect}
+            onExpressionBookmark={handleExpressionBookmark}
           />
         )}
 

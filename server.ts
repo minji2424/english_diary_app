@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
 
-dotenv.config();
+dotenv.config({ path: ['.env.local', '.env'] });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -264,6 +264,15 @@ app.post('/api/correct', async (req, res) => {
   if (!content || typeof content !== 'string' || content.trim().length === 0) {
     return res.status(400).json({ error: '일기 내용을 입력해 주세요.' });
   }
+  if (!process.env.GEMINI_API_KEY) {
+    return res.status(503).json({
+      error: 'AI 피드백을 사용할 수 없습니다.',
+      details: '서버에 GEMINI_API_KEY가 설정되어 있는지 확인해 주세요.',
+    });
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 45000);
 
   try {
     const systemInstruction = `당신은 한국인을 위한 세계 최고의 원어민 영어 작문 전문 멘토입니다.
@@ -284,12 +293,7 @@ ${content}
 
 위 일기를 철저히 분석하고 원어민 수준으로 교정하여 JSON 형식에 맞춰 응답해 주세요.`;
 
-    // Timeout promise for 28 seconds to prevent proxy drop
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('AI generation timeout')), 28000)
-    );
-
-    const apiPromise = ai.models.generateContent({
+    const response = await ai.models.generateContent({
       model: 'gemini-3.8-flash',
       contents: userPrompt,
       config: {
@@ -299,11 +303,10 @@ ${content}
         thinkingConfig: {
           thinkingLevel: ThinkingLevel.LOW,
         },
+        abortSignal: controller.signal,
         temperature: 0.7,
       },
     });
-
-    const response = (await Promise.race([apiPromise, timeoutPromise])) as any;
 
     let rawJson = response.text || '';
     rawJson = rawJson.trim();
@@ -355,10 +358,15 @@ ${content}
     }
 
     return res.json(parsed);
-  } catch (error: any) {
-    console.warn('Gemini API call failed or timed out, using fallback correction:', error.message);
-    const fallback = generateFallbackCorrection(title || '', content);
-    return res.json(fallback);
+  } catch (error) {
+    const details = error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다.';
+    console.error('Gemini diary feedback request failed:', details);
+    return res.status(502).json({
+      error: 'AI 피드백을 생성하지 못했습니다.',
+      details,
+    });
+  } finally {
+    clearTimeout(timeoutId);
   }
 });
 

@@ -56,7 +56,10 @@ export const VocabularyVault: React.FC<VocabularyVaultProps> = ({
 
   // Format date helper YYYY.MM.DD
   const formatDate = (dateStr?: string) => {
-    if (!dateStr) return '2026.10.25';
+    if (!dateStr) {
+      const today = new Date();
+      dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    }
     if (dateStr.includes('.')) return dateStr;
     try {
       const d = new Date(dateStr);

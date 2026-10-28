@@ -38,6 +38,10 @@ export const PawtyDiaryDetail: React.FC<PawtyDiaryDetailProps> = ({
     return allDiaries.find((d) => d.date === activeDate) || (activeDate === diary.date ? diary : null);
   }, [allDiaries, activeDate, diary]);
 
+  React.useEffect(() => {
+    setActivePhotoIndex(0);
+  }, [activeDate]);
+
   // Date shifting helper (YYYY-MM-DD +/- delta days)
   const shiftDate = (dateStr: string, dayDelta: number) => {
     try {
@@ -55,8 +59,12 @@ export const PawtyDiaryDetail: React.FC<PawtyDiaryDetailProps> = ({
 
   // Label for date: 'Today', 'Yesterday', or formatted day name
   const getDateLabel = (dateStr: string) => {
-    if (dateStr === '2026-10-26') return 'Today';
-    if (dateStr === '2026-10-25') return 'Yesterday';
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const yesterdayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    const yesterday = `${yesterdayDate.getFullYear()}-${String(yesterdayDate.getMonth() + 1).padStart(2, '0')}-${String(yesterdayDate.getDate()).padStart(2, '0')}`;
+    if (dateStr === today) return 'Today';
+    if (dateStr === yesterday) return 'Yesterday';
     try {
       const [y, m, d] = dateStr.split('-').map(Number);
       const dt = new Date(y, m - 1, d);
@@ -67,16 +75,17 @@ export const PawtyDiaryDetail: React.FC<PawtyDiaryDetailProps> = ({
     }
   };
 
-  // Sibling cats for the top strip matching before.png / before-1.png
+  // Show each neighboring day's saved cat, or a dot when no diary exists.
   const siblingCats = useMemo(() => {
-    // 4 sample dates around the active date
-    return [
-      { date: shiftDate(activeDate, -2), cat: 'dubu' },
-      { date: shiftDate(activeDate, -1), cat: 'neuru' },
-      { date: activeDate, cat: diaryForDate?.catId || (activeDate === '2026-10-25' ? 'neuru' : 'momo') },
-      { date: shiftDate(activeDate, 1), cat: 'momo' },
-    ];
-  }, [activeDate, diaryForDate]);
+    return [-2, -1, 0, 1, 2].map((offset) => {
+      const date = shiftDate(activeDate, offset);
+      return {
+        date,
+        diary: allDiaries.find((entry) => entry.date === date) ||
+          (date === activeDate ? diaryForDate || undefined : undefined),
+      };
+    });
+  }, [activeDate, allDiaries, diaryForDate]);
 
   // Photos array
   const photos = useMemo(() => {
@@ -189,22 +198,24 @@ export const PawtyDiaryDetail: React.FC<PawtyDiaryDetailProps> = ({
 
         {/* Horizontal Cat Strip */}
         <div className="flex items-center justify-center gap-5 sm:gap-6 w-full py-1 min-h-[60px]">
-          {siblingCats.map((item, idx) => {
+          {siblingCats.map((item) => {
             const isCurrent = item.date === activeDate;
             if (isCurrent) {
               return (
                 <div
-                  key={idx}
+                  key={item.date}
                   className="w-13 h-13 sm:w-14 sm:h-14 rounded-2xl bg-[#F5EFF6] flex items-center justify-center shadow-xs p-1 cursor-default shrink-0"
                 >
-                  {diaryForDate?.customDrawingUrl ? (
+                  {item.diary?.customDrawingUrl ? (
                     <img
-                      src={diaryForDate.customDrawingUrl}
+                      src={item.diary.customDrawingUrl}
                       alt="Cat"
                       className="w-10 h-10 object-contain drop-shadow-xs"
                     />
+                  ) : item.diary ? (
+                    <CatIcon name={item.diary.catId || 'momo'} size={32} />
                   ) : (
-                    <CatIcon name={item.cat} size={32} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#7D4C7D]" />
                   )}
                 </div>
               );
@@ -212,13 +223,19 @@ export const PawtyDiaryDetail: React.FC<PawtyDiaryDetailProps> = ({
 
             return (
               <button
-                key={idx}
+                key={item.date}
                 type="button"
                 onClick={() => setActiveDate(item.date)}
                 className="w-9 h-9 flex items-center justify-center opacity-75 hover:opacity-100 hover:scale-110 active:scale-95 transition-all cursor-pointer shrink-0"
-                title={`${item.date} 일기 보기`}
+                title={`${item.date}${item.diary ? ' 일기 보기' : ' 일기 없음'}`}
               >
-                <CatIcon name={item.cat} size={28} />
+                {item.diary?.customDrawingUrl ? (
+                  <img src={item.diary.customDrawingUrl} alt="Cat" className="w-8 h-8 object-contain" />
+                ) : item.diary ? (
+                  <CatIcon name={item.diary.catId || 'momo'} size={28} />
+                ) : (
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#7D4C7D]" />
+                )}
               </button>
             );
           })}
