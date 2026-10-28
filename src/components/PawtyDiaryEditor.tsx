@@ -1,8 +1,36 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ChevronLeft, Image as ImageIcon, Sparkles, Bookmark, Loader2, X } from 'lucide-react';
+import { ChevronLeft, Image as ImageIcon, Sparkles, Bookmark, Loader2, X, Lightbulb } from 'lucide-react';
 import { WeatherType, MoodType, CatId, SentenceBreakdown, CorrectionResult } from '../types/diary';
 import { CatDrawingCanvas } from './CatDrawingCanvas';
 import { CatIcon } from './CatIcons';
+import { readCorrectionResponse } from '../utils/correctionApi';
+
+const WRITING_HINTS = [
+  {
+    topic: '오늘의 작은 행복',
+    question: '오늘 당신을 미소 짓게 한 작은 순간은 무엇이었나요?',
+    prompt: 'What was one little thing that made you smile today?',
+    starter: 'One little thing that made me smile today was...',
+  },
+  {
+    topic: '기억에 남는 사람',
+    question: '오늘 만난 사람과 어떤 이야기를 나눴나요?',
+    prompt: 'Who did you spend time with, and what did you talk about?',
+    starter: 'I spent time with... and we talked about...',
+  },
+  {
+    topic: '새로운 경험',
+    question: '오늘 처음 해봤거나 새롭게 알게 된 것은 무엇인가요?',
+    prompt: 'What did you try or learn for the first time today?',
+    starter: 'Today, I tried... for the first time, and...',
+  },
+  {
+    topic: '하루를 마무리하며',
+    question: '오늘 하루를 돌아봤을 때 가장 고마운 일은 무엇인가요?',
+    prompt: 'What is one thing you feel grateful for today?',
+    starter: 'Looking back on today, I feel grateful for...',
+  },
+];
 
 interface PawtyDiaryEditorProps {
   initialTitle?: string;
@@ -85,7 +113,11 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
   const [savedBreakdownIndices, setSavedBreakdownIndices] = useState<Set<number>>(new Set<number>());
   const [isGeneratingFeedback, setIsGeneratingFeedback] = useState<boolean>(false);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
+  const [feedbackRetryCount, setFeedbackRetryCount] = useState(0);
+  const [forceFeedbackRequest, setForceFeedbackRequest] = useState(false);
   const [showDrawingModal, setShowDrawingModal] = useState<boolean>(false);
+  const [showWritingHints, setShowWritingHints] = useState(false);
+  const [writingHintIndex, setWritingHintIndex] = useState(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -105,7 +137,11 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
       return;
     }
 
-    if (initialCorrectionResult && currentText === initialContent.trim()) {
+    if (
+      !forceFeedbackRequest &&
+      initialCorrectionResult &&
+      currentText === initialContent.trim()
+    ) {
       setCorrectionResult(initialCorrectionResult);
       setBreakdowns(initialCorrectionResult.sentenceBreakdowns);
       setIsGeneratingFeedback(false);
@@ -132,15 +168,7 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
           signal: controller.signal,
         });
 
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.details || errorData.error || 'AI 피드백을 불러오지 못했습니다.');
-        }
-
-        const data: CorrectionResult = await response.json();
-        if (!Array.isArray(data.sentenceBreakdowns)) {
-          throw new Error('AI 피드백 응답 형식이 올바르지 않습니다.');
-        }
+        const data = await readCorrectionResponse(response);
 
         setCorrectionResult(data);
         setBreakdowns(data.sentenceBreakdowns);
@@ -160,7 +188,17 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
       window.clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [content, date, initialTitle, initialContent, initialCorrectionResult, initialWeather, initialMood]);
+  }, [
+    content,
+    date,
+    initialTitle,
+    initialContent,
+    initialCorrectionResult,
+    initialWeather,
+    initialMood,
+    feedbackRetryCount,
+    forceFeedbackRequest,
+  ]);
 
   // Format the selected date as YYYY.MM.DD.
   const formattedDate = React.useMemo(() => {
@@ -200,7 +238,15 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
       return;
     }
 
+    setForceFeedbackRequest(true);
     setActiveSubView('ai_feedback');
+  };
+
+  const handleUseWritingHint = (starter: string) => {
+    setContent((currentContent) =>
+      currentContent.trim() ? `${currentContent.trimEnd()}\n${starter}` : starter
+    );
+    setShowWritingHints(false);
   };
 
   // Toggle bookmark for Expression Vault
@@ -301,9 +347,19 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
               <p className="text-xs text-[#7D4C7D]">원어민 표현을 분석 중입니다... ✨</p>
             </div>
           ) : feedbackError ? (
-            <p className="rounded-2xl bg-rose-50 px-4 py-3 text-xs leading-relaxed text-rose-800">
-              {feedbackError}
-            </p>
+            <div className="rounded-2xl bg-rose-50 px-4 py-4 text-xs leading-relaxed text-rose-800">
+              <p>{feedbackError}</p>
+              <p className="mt-2 text-rose-700">
+                로컬에서 실행 중이라면 프로젝트 루트의 .env.local에 GEMINI_API_KEY를 설정한 뒤 서버를 다시 시작해 주세요.
+              </p>
+              <button
+                type="button"
+                onClick={() => setFeedbackRetryCount((count) => count + 1)}
+                className="mt-3 rounded-xl bg-rose-100 px-3 py-2 font-semibold text-rose-900 hover:bg-rose-200"
+              >
+                다시 시도
+              </button>
+            </div>
           ) : breakdowns.length === 0 ? (
             <p className="py-16 text-center text-xs text-[#9872A2]">
               문장을 입력하면 AI 피드백이 여기에 표시됩니다.
@@ -473,6 +529,40 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
             ))}
           </div>
         )}
+        {showWritingHints && (
+          <section className="mb-4 rounded-2xl border border-[#E8DDE9] bg-white p-4 shadow-xs">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-bold text-[#7D4C7D]">
+                  {WRITING_HINTS[writingHintIndex].topic}
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-[#6B6070]">
+                  {WRITING_HINTS[writingHintIndex].question}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  setWritingHintIndex((index) => (index + 1) % WRITING_HINTS.length)
+                }
+                className="shrink-0 rounded-full bg-[#F5EFF6] px-3 py-1.5 text-xs font-medium text-[#7D4C7D] hover:bg-[#E8DDE9]"
+              >
+                다른 힌트
+              </button>
+            </div>
+            <p className="mb-3 rounded-xl bg-[#FAF7FA] px-3 py-2 text-xs leading-relaxed text-[#7D4C7D]">
+              {WRITING_HINTS[writingHintIndex].prompt}
+            </p>
+            <button
+              type="button"
+              onClick={() => handleUseWritingHint(WRITING_HINTS[writingHintIndex].starter)}
+              className="w-full rounded-xl border border-[#E8DDE9] px-3 py-2.5 text-left text-xs leading-relaxed text-[#514454] hover:bg-[#FAF7FA]"
+            >
+              <span className="font-semibold text-[#7D4C7D]">문장 시작하기</span>
+              <span className="mt-1 block">{WRITING_HINTS[writingHintIndex].starter}</span>
+            </button>
+          </section>
+        )}
         <textarea
           value={content}
           onChange={(e) => setContent(e.target.value)}
@@ -482,8 +572,8 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
         />
       </div>
 
-      {/* Bottom Toolbar matching write_15b8868f.png & write-1_88245910.png:
-          Left: [Photo squircle] [Sparkle squircle]
+      {/* Bottom Toolbar:
+          Left: [Photo squircle] [Writing hint squircle] [Sparkle squircle]
           Right: [DONE] button */}
       <div className="fixed bottom-7 left-0 right-0 max-w-sm sm:max-w-md mx-auto px-6 flex items-center justify-between z-40 select-none pointer-events-none">
         {/* Left 2 Squircle Buttons */}
@@ -500,6 +590,19 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
           </button>
 
           {/* 2. Sparkle AI button */}
+          <button
+            type="button"
+            onClick={() => setShowWritingHints((visible) => !visible)}
+            aria-label="영작 힌트"
+            aria-expanded={showWritingHints}
+            title="영작 힌트 보기"
+            className={`w-12 h-12 rounded-2xl flex items-center justify-center cursor-pointer shadow-xs hover:opacity-90 active:scale-95 transition-all ${
+              showWritingHints ? 'bg-[#7D4C7D] text-white' : 'bg-[#E8DDE9] text-[#7D4C7D]'
+            }`}
+          >
+            <Lightbulb className="w-5 h-5 stroke-[1.8]" />
+          </button>
+
           <button
             type="button"
             onClick={handleOpenAIFeedback}

@@ -22,6 +22,7 @@ import {
   saveExpressions,
 } from './utils/storage';
 import { INITIAL_DIARIES } from './utils/initialData';
+import { readCorrectionResponse } from './utils/correctionApi';
 import { AlertCircle, CheckCircle } from 'lucide-react';
 
 export type AppView =
@@ -145,14 +146,7 @@ export default function App() {
         signal: controller.signal,
       });
 
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.details || errorData.error || '일기 교정 요청에 실패했습니다.');
-      }
-
-      const result: CorrectionResult = await response.json();
+      const result = await readCorrectionResponse(response);
       const wordCount = data.content.trim() ? data.content.trim().split(/\s+/).length : 0;
       const now = new Date().toISOString();
 
@@ -202,64 +196,11 @@ export default function App() {
 
       setCurrentDiary(targetDiary);
       setCurrentView('polish');
-    } catch (err: any) {
-      console.error(err);
-      const fallbackDiary: DiaryEntry = {
-        id: currentDiary?.id || `pawty-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        originalTitle: data.title,
-        originalContent: data.content,
-        date: data.date,
-        weather: data.weather,
-        mood: data.mood,
-        catId: data.catId,
-        catName: data.catName,
-        catTitle: data.catTitle,
-        customDrawingUrl: data.customDrawingUrl,
-        photoUrl: data.photoUrl,
-        photoUrls: data.photoUrls,
-        wordCount: data.content.split(/\s+/).length,
-        createdAt: currentDiary?.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        correctionResult: {
-          overallFeedback: {
-            summary: '따뜻한 하루의 여운이 잘 느껴지는 문장입니다. 자연스러운 감정 표현과 구어체 표현으로 다듬어 보았습니다.',
-            cefrLevel: 'B1 ➔ C1 Native',
-            scores: { grammar: 90, naturalness: 88, vocabulary: 85 },
-            keyTakeaways: ['감정을 설명할 땐 형용사구나 관용구를 쓰면 더욱 생생해집니다.'],
-          },
-          naturalTitle: data.title || 'A little pause',
-          correctedFullText: data.content,
-          styleVariations: {
-            casual: data.content,
-            sophisticated: data.content,
-            concise: data.content,
-          },
-          sentenceBreakdowns: [
-            {
-              original: 'I felt comfort',
-              corrected: 'I felt at ease',
-              koreanExplanation: "마음이 편안했다면 'at ease'가 잘 어울려요. 'comfort'는 감정을 나타내는 명사예요.",
-              categoryTag: '감정을 표현하는 말',
-              konglishAlert: '',
-              betterAlternativeWords: [],
-            },
-            {
-              original: "didn't notice the time",
-              corrected: 'lost track of time',
-              koreanExplanation: '즐거워서 시간 가는 줄 몰랐을 때 쓰는 표현이에요. 원래 문장의 따뜻한 느낌도 그대로예요.',
-              categoryTag: '일상에서 자주 쓰는 표현',
-              konglishAlert: '',
-              betterAlternativeWords: [],
-            },
-          ],
-          recommendedExpressions: [],
-        },
-      };
-
-      setCurrentDiary(fallbackDiary);
-      setDiaries((prev) => [fallbackDiary, ...prev.filter((d) => d.id !== fallbackDiary.id)]);
-      setCurrentView('polish');
+    } catch (error) {
+      console.error('Failed to polish diary:', error);
+      setErrorMessage(error instanceof Error ? error.message : 'AI 피드백 생성 중 오류가 발생했습니다.');
     } finally {
+      clearTimeout(timeoutId);
       setIsCorrecting(false);
     }
   };

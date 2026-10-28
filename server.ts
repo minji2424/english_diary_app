@@ -7,10 +7,12 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
 
-dotenv.config({ path: ['.env.local', '.env'] });
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+dotenv.config({
+  path: [path.resolve(__dirname, '.env.local'), path.resolve(__dirname, '.env')],
+});
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));

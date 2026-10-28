@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { DiaryEntry } from '../types/diary';
 import { CatIcon } from './CatIcons';
 import { PawtyNavDock } from './PawtyNavDock';
@@ -22,6 +22,7 @@ export const PawtyDiaryDetail: React.FC<PawtyDiaryDetailProps> = ({
   onBack,
   onSelectDiary,
   onEdit,
+  onDelete,
   onNewDiaryAtDate,
 }) => {
   // Current active viewed date (e.g. '2026-10-26')
@@ -268,6 +269,23 @@ export const PawtyDiaryDetail: React.FC<PawtyDiaryDetailProps> = ({
             className="flex flex-col items-center w-full cursor-pointer"
             title="터치하여 일기 수정하기"
           >
+            <div className="flex w-full justify-end">
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (window.confirm('이 일기를 삭제할까요? 삭제한 일기는 복구할 수 없습니다.')) {
+                    onDelete(diaryForDate.id);
+                  }
+                }}
+                aria-label="이 일기 삭제"
+                className="flex items-center gap-1.5 rounded-full px-3 py-2 text-xs font-medium text-[#9A7186] hover:bg-rose-50 hover:text-rose-600 transition-colors"
+              >
+                <Trash2 className="h-4 w-4" />
+                <span>일기 삭제</span>
+              </button>
+            </div>
+
             {/* Photo with natural adaptive aspect ratio (NO 1/4 count badge) */}
             {hasPhotos && (
               <div className="relative w-full max-w-[280px] sm:max-w-xs my-4 select-none flex flex-col items-center">
