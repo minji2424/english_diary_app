@@ -6,6 +6,7 @@ import { ExpressionPolish } from './components/ExpressionPolish';
 import { VocabularyVault } from './components/VocabularyVault';
 import { PawtyHistory } from './components/PawtyHistory';
 import { SettingsView } from './components/SettingsView';
+import { PawtyDiaryTutorModal } from './components/PawtyDiaryTutorModal';
 import {
   DiaryEntry,
   SavedExpression,
@@ -50,6 +51,7 @@ export default function App() {
     return list.find((d) => d.date === todayString) || (list.length > 0 ? list[0] : null);
   });
   const [isCorrecting, setIsCorrecting] = useState<boolean>(false);
+  const [isChatOpen, setIsChatOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -421,6 +423,7 @@ export default function App() {
             onSelectDiary={handleSelectDiary}
             onNewDiary={handleNewDiary}
             onOpenVault={() => setCurrentView('vault')}
+            onOpenChat={() => setIsChatOpen(true)}
             onOpenSettings={() => setCurrentView('settings')}
           />
         )}
@@ -501,6 +504,16 @@ export default function App() {
           />
         )}
       </div>
+
+      {/* Global AI English Diary Tutor Chatbot Modal */}
+      <PawtyDiaryTutorModal
+        isOpen={isChatOpen}
+        onClose={() => setIsChatOpen(false)}
+        onInsertIntoDiary={(sentence) => {
+          handleNewDiary();
+          showToast('일기 작성 화면으로 이동하여 문장을 작성해 보세요 🐾');
+        }}
+      />
     </div>
   );
 }

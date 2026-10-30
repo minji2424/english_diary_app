@@ -274,11 +274,11 @@ export const PawtyDiaryDetail: React.FC<PawtyDiaryDetailProps> = ({
                 type="button"
                 onClick={(event) => {
                   event.stopPropagation();
-                  if (window.confirm('이 일기를 삭제할까요? 삭제한 일기는 복구할 수 없습니다.')) {
+                  if (window.confirm('일기를 삭제할까요? 삭제한 일기는 복구할 수 없습니다.')) {
                     onDelete(diaryForDate.id);
                   }
                 }}
-                aria-label="이 일기 삭제"
+                aria-label="일기 삭제"
                 className="flex items-center gap-1.5 rounded-full px-3 py-2 text-xs font-medium text-[#9A7186] hover:bg-rose-50 hover:text-rose-600 transition-colors"
               >
                 <Trash2 className="h-4 w-4" />

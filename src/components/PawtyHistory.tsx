@@ -112,7 +112,7 @@ export const PawtyHistory: React.FC<PawtyHistoryProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="제목 또는 일기 내용 검색..."
+              placeholder="검색"
               className="w-full pl-4 pr-10 py-2.5 rounded-full bg-white border border-[#E2D6CD] text-xs text-[#1F1735] placeholder-[#9B8C82] focus:outline-none focus:border-[#8D4F2B]"
               autoFocus
             />

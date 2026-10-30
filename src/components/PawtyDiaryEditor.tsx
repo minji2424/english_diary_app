@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ChevronLeft, Image as ImageIcon, Sparkles, Bookmark, Loader2, X, Lightbulb } from 'lucide-react';
+import { ChevronLeft, Image as ImageIcon, Sparkles, Bookmark, Loader2, X, Lightbulb, Search, Plus, Bot } from 'lucide-react';
 import { WeatherType, MoodType, CatId, SentenceBreakdown, CorrectionResult } from '../types/diary';
 import { CatDrawingCanvas } from './CatDrawingCanvas';
 import { CatIcon } from './CatIcons';
 import { readCorrectionResponse } from '../utils/correctionApi';
+import { PawtyDiaryTutorModal } from './PawtyDiaryTutorModal';
 
 const WRITING_HINTS = [
   {
@@ -116,11 +117,28 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
   const [feedbackRetryCount, setFeedbackRetryCount] = useState(0);
   const [forceFeedbackRequest, setForceFeedbackRequest] = useState(false);
   const [showDrawingModal, setShowDrawingModal] = useState<boolean>(false);
+  const [showChatModal, setShowChatModal] = useState<boolean>(false);
   const [showWritingHints, setShowWritingHints] = useState(false);
+  const [helperTab, setHelperTab] = useState<'search' | 'hints'>('search');
+  const [expressionQuery, setExpressionQuery] = useState('');
+  const [isSearchingExpression, setIsSearchingExpression] = useState(false);
+  const [searchResult, setSearchResult] = useState<{
+    query: string;
+    expressions: {
+      english: string;
+      koreanMeaning: string;
+      tone: string;
+      nuanceTip: string;
+    }[];
+    keyVocabulary?: { word: string; meaning: string }[];
+  } | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [bookmarkedSearchIndices, setBookmarkedSearchIndices] = useState<Set<number>>(new Set());
   const [writingHintIndex, setWritingHintIndex] = useState(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const clientFeedbackCache = useRef<Map<string, CorrectionResult>>(new Map());
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -137,6 +155,17 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
       return;
     }
 
+    // Check client-side memory cache first
+    if (clientFeedbackCache.current.has(currentText)) {
+      const cached = clientFeedbackCache.current.get(currentText)!;
+      setCorrectionResult(cached);
+      setBreakdowns(cached.sentenceBreakdowns);
+      setFeedbackError(null);
+      setIsGeneratingFeedback(false);
+      if (forceFeedbackRequest) setForceFeedbackRequest(false);
+      return;
+    }
+
     if (
       !forceFeedbackRequest &&
       initialCorrectionResult &&
@@ -148,11 +177,18 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
       return;
     }
 
+    // Don't auto-query if text is extremely brief (e.g. single character) unless explicitly requested
+    if (!forceFeedbackRequest && currentText.length < 8) {
+      setIsGeneratingFeedback(false);
+      return;
+    }
+
     const controller = new AbortController();
     setFeedbackError(null);
-    setBreakdowns([]);
-    setCorrectionResult(null);
     setIsGeneratingFeedback(true);
+
+    const delayMs = forceFeedbackRequest ? 0 : 1800;
+
     const timeoutId = window.setTimeout(async () => {
       try {
         const response = await fetch('/api/correct', {
@@ -170,19 +206,24 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
 
         const data = await readCorrectionResponse(response);
 
+        // Store in cache
+        clientFeedbackCache.current.set(currentText, data);
+
         setCorrectionResult(data);
         setBreakdowns(data.sentenceBreakdowns);
         setSavedBreakdownIndices(new Set<number>());
+        setFeedbackError(null);
       } catch (error) {
         if (controller.signal.aborted) return;
-        console.error('Failed to generate live diary feedback', error);
+        console.warn('Live diary feedback notice:', error);
         setFeedbackError(error instanceof Error ? error.message : 'AI 피드백 생성 중 오류가 발생했습니다.');
-        setCorrectionResult(null);
-        setBreakdowns([]);
       } finally {
-        if (!controller.signal.aborted) setIsGeneratingFeedback(false);
+        if (!controller.signal.aborted) {
+          setIsGeneratingFeedback(false);
+          setForceFeedbackRequest(false);
+        }
       }
-    }, 700);
+    }, delayMs);
 
     return () => {
       window.clearTimeout(timeoutId);
@@ -247,6 +288,79 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
       currentContent.trim() ? `${currentContent.trimEnd()}\n${starter}` : starter
     );
     setShowWritingHints(false);
+  };
+
+  // Search natural English expression for a Korean thought
+  const handleSearchExpression = async (queryToSearch?: string) => {
+    const q = (queryToSearch ?? expressionQuery).trim();
+    if (!q) {
+      showToast('검색할 표현을 입력해 주세요.');
+      return;
+    }
+    setExpressionQuery(q);
+    setIsSearchingExpression(true);
+    setSearchError(null);
+    setBookmarkedSearchIndices(new Set());
+
+    try {
+      const res = await fetch('/api/expression-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: q }),
+      });
+      if (!res.ok) {
+        throw new Error('표현을 검색하지 못했습니다.');
+      }
+      const data = await res.json();
+      setSearchResult(data);
+    } catch (err) {
+      console.warn('Expression search error:', err);
+      setSearchError('표현을 불러오는 중 문제가 발생했습니다. 다시 시도해 주세요.');
+    } finally {
+      setIsSearchingExpression(false);
+    }
+  };
+
+  // Insert expression directly into diary content
+  const handleInsertExpression = (englishSentence: string) => {
+    setContent((prev) => {
+      const trimmed = prev.trim();
+      if (!trimmed) return englishSentence;
+      if (/[.!?]$/.test(trimmed)) {
+        return `${trimmed}\n${englishSentence}`;
+      }
+      return `${trimmed}. ${englishSentence}`;
+    });
+    showToast('일기에 표현이 추가되었습니다! ✍️');
+  };
+
+  // Bookmark searched expression into Vocabulary Vault
+  const handleBookmarkSearchedExpression = (idx: number) => {
+    if (!searchResult) return;
+    const item = searchResult.expressions[idx];
+    if (!item) return;
+
+    const isSaved = bookmarkedSearchIndices.has(idx);
+    setBookmarkedSearchIndices((prev) => {
+      const next = new Set(prev);
+      if (isSaved) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+
+    const breakdown: SentenceBreakdown = {
+      original: item.koreanMeaning,
+      corrected: item.english,
+      koreanExplanation: item.nuanceTip || item.tone,
+      konglishAlert: '',
+      betterAlternativeWords: [],
+      keyIdiom: item.english,
+      keyIdiomMeaning: item.koreanMeaning,
+      categoryTag: '표현 검색',
+    };
+
+    onExpressionBookmark?.(breakdown, !isSaved);
+    showToast(!isSaved ? '표현 사전에 저장되었습니다! 🔖' : '표현 사전 저장이 취소되었습니다.');
   };
 
   // Toggle bookmark for Expression Vault
@@ -344,26 +458,48 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
           {isGeneratingFeedback ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
               <Loader2 className="w-6 h-6 animate-spin text-[#7D4C7D]" />
-              <p className="text-xs text-[#7D4C7D]">원어민 표현을 분석 중입니다... ✨</p>
+              <p className="text-xs text-[#7D4C7D]">Analyzing..</p>
             </div>
           ) : feedbackError ? (
-            <div className="rounded-2xl bg-rose-50 px-4 py-4 text-xs leading-relaxed text-rose-800">
+            <div className="rounded-2xl bg-purple-50/70 border border-purple-100 px-4 py-4 text-xs leading-relaxed text-[#7D4C7D]">
               <p>{feedbackError}</p>
-              <p className="mt-2 text-rose-700">
-                로컬에서 실행 중이라면 프로젝트 루트의 .env.local에 GEMINI_API_KEY를 설정한 뒤 서버를 다시 시작해 주세요.
-              </p>
               <button
                 type="button"
-                onClick={() => setFeedbackRetryCount((count) => count + 1)}
-                className="mt-3 rounded-xl bg-rose-100 px-3 py-2 font-semibold text-rose-900 hover:bg-rose-200"
+                onClick={() => {
+                  setFeedbackError(null);
+                  setForceFeedbackRequest(true);
+                  setFeedbackRetryCount((count) => count + 1);
+                }}
+                className="mt-3 rounded-xl bg-[#7D4C7D] px-3.5 py-2 font-semibold text-white hover:bg-[#6E3F6E]"
               >
                 다시 시도
               </button>
             </div>
           ) : breakdowns.length === 0 ? (
-            <p className="py-16 text-center text-xs text-[#9872A2]">
-              문장을 입력하면 AI 피드백이 여기에 표시됩니다.
-            </p>
+            content.trim().length > 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+                <div className="w-16 h-16 rounded-3xl bg-[#F5EFF6] flex items-center justify-center text-2xl mb-4 text-[#7D4C7D] shadow-xs">
+                  ✨
+                </div>
+                <h4 className="text-[17px] font-sans font-bold text-[#1F1735] mb-2">
+                  Spot on! Nothing to correct here
+                </h4>
+                <p className="text-[13px] font-sans text-[#7D4C7D] leading-relaxed max-w-xs">
+                  {correctionResult?.overallFeedback?.summary ||
+                    '완벽합니다! 교정할 내용이 없어요.'}
+                </p>
+                <div className="mt-6 p-4 rounded-2xl bg-white border border-[#EFE8F2] w-full text-left">
+                  <div className="text-[11px] font-bold text-[#9872A2] mb-1">내 일기</div>
+                  <div className="text-[14px] text-[#1F1735] font-sans leading-relaxed">
+                    {content}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="py-16 text-center text-xs text-[#9872A2]">
+                문장을 입력하면 AI 피드백이 여기에 표시됩니다.
+              </p>
+            )
           ) : (
             breakdowns.map((item, idx) => {
               const isBookmarked = savedBreakdownIndices.has(idx);
@@ -421,10 +557,11 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
         <div className="fixed bottom-7 left-0 right-0 max-w-sm sm:max-w-md mx-auto px-6 z-40 select-none">
           <button
             type="button"
-            onClick={handleApplyPolishedText}
-            className="w-full py-4 rounded-2xl bg-[#7D4C7D] hover:bg-[#6E3F6E] active:scale-[0.98] text-white text-center text-[17px] font-mongtori font-bold shadow-md transition-all cursor-pointer"
+            onClick={breakdowns.length > 0 ? handleApplyPolishedText : () => setActiveSubView('editor')}
+            style={{ fontFamily: "'Pretendard', sans-serif" }}
+            className="w-full py-4 rounded-2xl bg-[#7D4C7D] hover:bg-[#6E3F6E] active:scale-[0.98] text-white text-center text-[16px] font-pretendard font-semibold shadow-md transition-all cursor-pointer"
           >
-            Modify using this
+            {breakdowns.length > 0 ? 'Modify using this' : 'Keep my writing'}
           </button>
         </div>
       </div>
@@ -529,38 +666,212 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
             ))}
           </div>
         )}
+
         {showWritingHints && (
-          <section className="mb-4 rounded-2xl border border-[#E8DDE9] bg-white p-4 shadow-xs">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-bold text-[#7D4C7D]">
-                  {WRITING_HINTS[writingHintIndex].topic}
-                </p>
-                <p className="mt-1 text-xs leading-relaxed text-[#6B6070]">
-                  {WRITING_HINTS[writingHintIndex].question}
-                </p>
+          <section className="mb-4 rounded-3xl border border-[#E8DDE9] bg-white p-4 sm:p-5 shadow-xs animate-fadeIn">
+            {/* Top Tabs: Expression Search vs Writing Hints */}
+            <div className="flex items-center justify-between pb-3 border-b border-[#F0E6F2] mb-3">
+              <div className="flex items-center gap-1.5 p-1 bg-[#FAF7FA] rounded-2xl">
+                <button
+                  type="button"
+                  onClick={() => setHelperTab('search')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                    helperTab === 'search'
+                      ? 'bg-[#7D4C7D] text-white shadow-xs'
+                      : 'text-[#6B6070] hover:text-[#7D4C7D]'
+                  }`}
+                >
+                  <Search className="w-3.5 h-3.5" />
+                  <span>표현 검색</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHelperTab('hints')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                    helperTab === 'hints'
+                      ? 'bg-[#7D4C7D] text-white shadow-xs'
+                      : 'text-[#6B6070] hover:text-[#7D4C7D]'
+                  }`}
+                >
+                  <Lightbulb className="w-3.5 h-3.5" />
+                  <span>영작 힌트</span>
+                </button>
               </div>
+
               <button
                 type="button"
-                onClick={() =>
-                  setWritingHintIndex((index) => (index + 1) % WRITING_HINTS.length)
-                }
-                className="shrink-0 rounded-full bg-[#F5EFF6] px-3 py-1.5 text-xs font-medium text-[#7D4C7D] hover:bg-[#E8DDE9]"
+                onClick={() => setShowWritingHints(false)}
+                className="p-1 rounded-full text-[#9A7186] hover:bg-[#FAF7FA] cursor-pointer"
+                aria-label="닫기"
               >
-                다른 힌트
+                <X className="w-4 h-4" />
               </button>
             </div>
-            <p className="mb-3 rounded-xl bg-[#FAF7FA] px-3 py-2 text-xs leading-relaxed text-[#7D4C7D]">
-              {WRITING_HINTS[writingHintIndex].prompt}
-            </p>
-            <button
-              type="button"
-              onClick={() => handleUseWritingHint(WRITING_HINTS[writingHintIndex].starter)}
-              className="w-full rounded-xl border border-[#E8DDE9] px-3 py-2.5 text-left text-xs leading-relaxed text-[#514454] hover:bg-[#FAF7FA]"
-            >
-              <span className="font-semibold text-[#7D4C7D]">문장 시작하기</span>
-              <span className="mt-1 block">{WRITING_HINTS[writingHintIndex].starter}</span>
-            </button>
+
+            {/* TAB 1: EXPRESSION SEARCH */}
+            {helperTab === 'search' ? (
+              <div className="space-y-3">
+                <div>
+                  <p className="text-[11px] font-bold text-[#7D4C7D] mb-1.5">
+                    한국어로 쓰고 싶은 말을 적으면 원어민 표현으로 찾아드려요
+                  </p>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleSearchExpression();
+                    }}
+                    className="flex items-center gap-2"
+                  >
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        value={expressionQuery}
+                        onChange={(e) => setExpressionQuery(e.target.value)}
+                        placeholder="예: 오늘 면접봤어, 시간 가는 줄 몰랐어"
+                        className="w-full pl-3 pr-3 py-2 rounded-xl bg-[#FAF7FA] border border-[#E8DDE9] text-xs text-[#1F1735] placeholder-[#A89BAA] focus:outline-none focus:border-[#7D4C7D] focus:bg-white transition-all"
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={isSearchingExpression}
+                      className="px-3.5 py-2 rounded-xl bg-[#7D4C7D] hover:bg-[#6E3F6E] active:scale-95 text-white text-xs font-semibold shadow-xs flex items-center gap-1 cursor-pointer transition-all shrink-0"
+                    >
+                      {isSearchingExpression ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Search className="w-3.5 h-3.5" />
+                      )}
+                      <span>검색</span>
+                    </button>
+                  </form>
+                </div>
+
+
+                {/* Search State / Result Cards */}
+                {isSearchingExpression ? (
+                  <div className="py-7 flex flex-col items-center justify-center gap-2 text-xs text-[#7D4C7D]">
+                    <Loader2 className="w-5 h-5 animate-spin text-[#7D4C7D]" />
+                    <span>원어민 일기 표현을 찾는 중... 🐾</span>
+                  </div>
+                ) : searchError ? (
+                  <div className="p-3 rounded-xl bg-purple-50 text-xs text-[#7D4C7D]">
+                    {searchError}
+                  </div>
+                ) : searchResult ? (
+                  <div className="space-y-2.5 pt-1 max-h-[300px] overflow-y-auto pr-1">
+                    <div className="flex items-center justify-between text-[11px] text-[#9A7186] font-medium">
+                      <span>"{searchResult.query}" 추천 영어 표현</span>
+                      <span>{searchResult.expressions.length}개 제안</span>
+                    </div>
+
+                    {searchResult.expressions.map((expr, idx) => {
+                      const isSaved = bookmarkedSearchIndices.has(idx);
+                      return (
+                        <div
+                          key={idx}
+                          className="p-3 rounded-2xl bg-[#FAF7FA] border border-[#EFE8F2] hover:border-[#D8BFD8] transition-all space-y-2 text-left"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="px-2 py-0.5 rounded-full bg-[#E8DDE9] text-[#7D4C7D] text-[10px] font-bold">
+                              {expr.tone}
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleBookmarkSearchedExpression(idx)}
+                                className="p-1 rounded-lg text-[#5BA8B0] hover:bg-white transition-all cursor-pointer"
+                                title={isSaved ? '표현 사전에 저장됨' : '표현 사전에 저장'}
+                              >
+                                {isSaved ? (
+                                  <Bookmark className="w-3.5 h-3.5 fill-[#5BA8B0] stroke-none" />
+                                ) : (
+                                  <Bookmark className="w-3.5 h-3.5 stroke-[2]" />
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleInsertExpression(expr.english)}
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[#7D4C7D] hover:bg-[#6E3F6E] active:scale-95 text-white text-[11px] font-semibold transition-all cursor-pointer"
+                                title="이 문장을 일기에 바로 삽입"
+                              >
+                                <Plus className="w-3 h-3" />
+                                <span>일기에 추가</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          <p className="text-[13px] font-sans font-semibold text-[#1F1735] leading-snug">
+                            {expr.english}
+                          </p>
+                          <p className="text-[11px] font-sans text-[#6B6070]">
+                            {expr.koreanMeaning}
+                          </p>
+                          {expr.nuanceTip && (
+                            <div className="p-2 rounded-xl bg-white border border-[#EFE8F2] text-[11px] text-[#7D4C7D] leading-relaxed">
+                              💡 {expr.nuanceTip}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {searchResult.keyVocabulary && searchResult.keyVocabulary.length > 0 && (
+                      <div className="p-2.5 rounded-2xl bg-white border border-[#EFE8F2]">
+                        <p className="text-[11px] font-bold text-[#7D4C7D] mb-1.5">관련 핵심 어휘 & 구동사</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {searchResult.keyVocabulary.map((v, i) => (
+                            <span
+                              key={i}
+                              className="px-2 py-0.5 rounded-lg bg-[#FAF7FA] border border-[#EFE8F2] text-[11px] text-[#1F1735]"
+                            >
+                              <span className="font-semibold text-[#7D4C7D]">{v.word}</span>: {v.meaning}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="py-2 text-[11px] text-[#9A7186] text-center">
+                    궁금한 우리말 표현을 검색해 보세요!
+                  </p>
+                )}
+              </div>
+            ) : (
+              /* TAB 2: WRITING HINTS */
+              <div>
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold text-[#7D4C7D]">
+                      {WRITING_HINTS[writingHintIndex].topic}
+                    </p>
+                    <p className="mt-1 text-xs leading-relaxed text-[#6B6070]">
+                      {WRITING_HINTS[writingHintIndex].question}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setWritingHintIndex((index) => (index + 1) % WRITING_HINTS.length)
+                    }
+                    className="shrink-0 rounded-full bg-[#F5EFF6] px-3 py-1.5 text-xs font-medium text-[#7D4C7D] hover:bg-[#E8DDE9]"
+                  >
+                    다른 힌트
+                  </button>
+                </div>
+                <p className="mb-3 rounded-xl bg-[#FAF7FA] px-3 py-2 text-xs leading-relaxed text-[#7D4C7D]">
+                  {WRITING_HINTS[writingHintIndex].prompt}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => handleUseWritingHint(WRITING_HINTS[writingHintIndex].starter)}
+                  className="w-full rounded-xl border border-[#E8DDE9] px-3 py-2.5 text-left text-xs leading-relaxed text-[#514454] hover:bg-[#FAF7FA]"
+                >
+                  <span className="font-semibold text-[#7D4C7D]">문장 시작하기</span>
+                  <span className="mt-1 block">{WRITING_HINTS[writingHintIndex].starter}</span>
+                </button>
+              </div>
+            )}
           </section>
         )}
         <textarea
@@ -589,13 +900,13 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
             <ImageIcon className="w-5 h-5 stroke-[1.8]" />
           </button>
 
-          {/* 2. Sparkle AI button */}
+          {/* 2. Expression Search & Writing Hint button */}
           <button
             type="button"
             onClick={() => setShowWritingHints((visible) => !visible)}
-            aria-label="영작 힌트"
+            aria-label="표현 검색 및 영작 힌트"
             aria-expanded={showWritingHints}
-            title="영작 힌트 보기"
+            title="표현 검색 및 영작 힌트 보기"
             className={`w-12 h-12 rounded-2xl flex items-center justify-center cursor-pointer shadow-xs hover:opacity-90 active:scale-95 transition-all ${
               showWritingHints ? 'bg-[#7D4C7D] text-white' : 'bg-[#E8DDE9] text-[#7D4C7D]'
             }`}
@@ -608,9 +919,29 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
             onClick={handleOpenAIFeedback}
             aria-label="AI 피드백"
             title="AI 피드백 보기"
-            className="w-12 h-12 rounded-2xl bg-[#E8DDE9] text-[#7D4C7D] flex items-center justify-center cursor-pointer shadow-xs hover:opacity-90 active:scale-95 transition-all"
+            className="relative w-12 h-12 rounded-2xl bg-[#E8DDE9] text-[#7D4C7D] flex items-center justify-center cursor-pointer shadow-xs hover:opacity-90 active:scale-95 transition-all"
           >
-            <Sparkles className="w-5 h-5 stroke-[1.8]" />
+            {isGeneratingFeedback ? (
+              <Loader2 className="w-5 h-5 animate-spin text-[#7D4C7D]" />
+            ) : (
+              <Sparkles className="w-5 h-5 stroke-[1.8]" />
+            )}
+            {breakdowns.length > 0 && !isGeneratingFeedback && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#FF3B30] text-[10px] text-white font-bold flex items-center justify-center animate-fadeIn">
+                {breakdowns.length}
+              </span>
+            )}
+          </button>
+
+          {/* 4. AI Diary Tutor Chatbot button */}
+          <button
+            type="button"
+            onClick={() => setShowChatModal(true)}
+            aria-label="영어 일기 튜터 챗봇"
+            title="Pawty AI 일기 튜터 (일기 작성이 막막할 때 물어보세요!)"
+            className="w-12 h-12 rounded-2xl bg-[#E8DDE9] text-[#7D4C7D] hover:bg-[#DBCBDE] flex items-center justify-center cursor-pointer shadow-xs hover:opacity-90 active:scale-95 transition-all"
+          >
+            <Bot className="w-5 h-5 stroke-[1.8]" />
           </button>
         </div>
 
@@ -637,18 +968,28 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
             onSaveDrawing={(dataUrl) => {
               setCustomDrawingUrl(dataUrl);
               setShowDrawingModal(false);
-              showToast('나만의 고양이가 일기에 적용되었습니다! 🐾');
+              showToast('나만의 고양이가 일기에 적용되었습니다');
             }}
             onSelectCatPreset={(cId) => {
               setCatId(cId);
               setCustomDrawingUrl(undefined);
               setShowDrawingModal(false);
-              showToast('고양이 캐릭터가 선택되었습니다! 🐾');
+              showToast('고양이가 선택되었습니다');
             }}
             onClose={() => setShowDrawingModal(false)}
           />
         </div>
       )}
+
+      {/* AI Diary Tutor Chatbot Modal */}
+      <PawtyDiaryTutorModal
+        isOpen={showChatModal}
+        onClose={() => setShowChatModal(false)}
+        onInsertIntoDiary={(sentence) => {
+          setContent((prev) => (prev.trim() ? `${prev.trim()}\n\n${sentence}` : sentence));
+          showToast('문장이 일기에 추가되었습니다 🐾');
+        }}
+      />
     </div>
   );
 };

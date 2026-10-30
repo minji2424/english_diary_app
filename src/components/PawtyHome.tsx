@@ -1,8 +1,23 @@
 import React, { useState, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, BookOpen } from 'lucide-react';
+import { ChevronLeft, ChevronRight, BookOpen, MessageCircle } from 'lucide-react';
 import { DiaryEntry } from '../types/diary';
 import { CatIcon } from './CatIcons';
 import { PawtyNavDock } from './PawtyNavDock';
+
+const MONTH_NAMES = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
 
 interface PawtyHomeProps {
   diaries: DiaryEntry[];
@@ -11,6 +26,7 @@ interface PawtyHomeProps {
   onSelectDiary: (diary: DiaryEntry) => void;
   onNewDiary: (date?: string) => void;
   onOpenVault: () => void;
+  onOpenChat?: () => void;
   onOpenSettings?: () => void;
 }
 
@@ -21,6 +37,7 @@ export const PawtyHome: React.FC<PawtyHomeProps> = ({
   onSelectDiary,
   onNewDiary,
   onOpenVault,
+  onOpenChat,
 }) => {
   const today = new Date();
   const [localYearMonth, setLocalYearMonth] = useState(() => ({
@@ -96,17 +113,29 @@ export const PawtyHome: React.FC<PawtyHomeProps> = ({
           Pawty
         </h1>
 
-        <button
-          onClick={onOpenVault}
-          aria-label="표현 사전 열기"
-          title="표현 사전 (AI 추천 표현 모음)"
-          className="p-1 text-[#7D4C7D] hover:opacity-80 transition-opacity cursor-pointer"
-        >
-          <BookOpen className="w-6 h-6 stroke-[1.8]" />
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={onOpenChat}
+            aria-label="영어 일기 도우미 챗봇"
+            title="Pawty 일기 튜터 (일기 작성이 어려울 때 물어보세요!)"
+            className="p-1.5 rounded-full text-[#7D4C7D] hover:bg-[#F5EFF6] transition-all cursor-pointer relative"
+          >
+            <MessageCircle className="w-5 h-5 stroke-[1.8]" />
+            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#59A8B0]" />
+          </button>
+
+          <button
+            onClick={onOpenVault}
+            aria-label="표현 사전 열기"
+            title="표현 사전 (AI 추천 표현 모음)"
+            className="p-1 text-[#7D4C7D] hover:opacity-80 transition-opacity cursor-pointer"
+          >
+            <BookOpen className="w-6 h-6 stroke-[1.8]" />
+          </button>
+        </div>
       </div>
 
-      {/* Month selector */}
+      {/* Month selector: English month name, 2026 removed */}
       <div className="flex items-center justify-center gap-3 py-2 w-full">
         <button
           onClick={() => changeMonth(-1)}
@@ -117,8 +146,8 @@ export const PawtyHome: React.FC<PawtyHomeProps> = ({
           <ChevronLeft className="w-3.5 h-3.5 stroke-[2.5]" />
         </button>
 
-        <span className="bg-[#7D4C7D] text-white text-xs sm:text-[13px] font-sans font-medium px-5 py-1 rounded-full shadow-xs tracking-wider">
-          {year}년 {month}월
+        <span className="bg-[#7D4C7D] text-white text-xs sm:text-[13px] font-sans font-semibold px-6 py-1 rounded-full shadow-xs tracking-wider">
+          {MONTH_NAMES[month - 1]}
         </span>
 
         <button
