@@ -103,11 +103,16 @@ export default function App() {
 
   // Delete diary
   const handleDeleteDiary = (id: string) => {
-    setDiaries((prev) => prev.filter((d) => d.id !== id));
-    if (currentDiary?.id === id) {
-      setCurrentDiary(null);
+    const updatedDiaries = diaries.filter((diary) => diary.id !== id);
+    if (updatedDiaries.length === diaries.length) {
+      showToast('삭제할 일기를 찾지 못했습니다. 새로고침 후 다시 시도해 주세요.');
+      return;
     }
-    showToast('기억이 삭제되었습니다.');
+
+    saveDiaries(updatedDiaries);
+    setDiaries(updatedDiaries);
+    setCurrentDiary((current) => (current?.id === id ? null : current));
+    showToast('일기가 삭제되었습니다.');
     setCurrentView('home');
   };
 
