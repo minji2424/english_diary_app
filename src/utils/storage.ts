@@ -1,5 +1,4 @@
 import { DiaryEntry, SavedExpression } from '../types/diary';
-import { INITIAL_DIARIES, INITIAL_EXPRESSIONS } from './initialData';
 
 const DIARIES_KEY = 'pawty_diaries_v4';
 const EXPRESSIONS_KEY = 'pawty_expressions_user_saved_v5';
@@ -8,14 +7,21 @@ export function getStoredDiaries(): DiaryEntry[] {
   try {
     const raw = localStorage.getItem(DIARIES_KEY);
     if (!raw) {
-      localStorage.setItem(DIARIES_KEY, JSON.stringify(INITIAL_DIARIES));
-      return INITIAL_DIARIES;
+      return [];
     }
-    const parsed = JSON.parse(raw);
-    return parsed.length > 0 ? parsed : INITIAL_DIARIES;
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      throw new Error('Stored diaries must be an array');
+    }
+
+    const diaries = (parsed as DiaryEntry[]).filter((diary) => diary.id !== 'pawty-1');
+    if (diaries.length !== parsed.length) {
+      saveDiaries(diaries);
+    }
+    return diaries;
   } catch (e) {
     console.error('Failed to parse diaries from localStorage', e);
-    return INITIAL_DIARIES;
+    return [];
   }
 }
 

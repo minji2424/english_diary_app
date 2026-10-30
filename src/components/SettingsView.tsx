@@ -194,7 +194,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <button
             type="button"
             onClick={() => {
-              if (window.confirm('모든 기록을 초기화하시겠습니까? (초기 데이터로 복원됩니다)')) {
+              if (window.confirm('모든 일기를 삭제하시겠습니까? 삭제한 일기는 복구할 수 없습니다.')) {
                 onResetData?.();
               }
             }}

@@ -22,7 +22,6 @@ import {
   getStoredExpressions,
   saveExpressions,
 } from './utils/storage';
-import { INITIAL_DIARIES } from './utils/initialData';
 import { readCorrectionResponse } from './utils/correctionApi';
 import { AlertCircle, CheckCircle } from 'lucide-react';
 
@@ -374,12 +373,12 @@ export default function App() {
     setCurrentView('write');
   };
 
-  // Reset demo data
+  // Reset diaries
   const handleResetData = () => {
-    setDiaries(INITIAL_DIARIES);
-    saveDiaries(INITIAL_DIARIES);
-    setCurrentDiary(INITIAL_DIARIES[0]);
-    showToast('데이터가 초기 설정으로 복원되었습니다.');
+    setDiaries([]);
+    saveDiaries([]);
+    setCurrentDiary(null);
+    showToast('모든 일기가 삭제되었습니다.');
     setCurrentView('home');
   };
 
