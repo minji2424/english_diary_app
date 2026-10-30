@@ -145,6 +145,61 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
     setTimeout(() => setToastMessage(null), 2500);
   };
 
+  const executeFeedbackRequest = React.useCallback(async (textToAnalyze: string, bypassCache = false) => {
+    const currentText = textToAnalyze.trim();
+    if (!currentText) {
+      setBreakdowns([]);
+      setCorrectionResult(null);
+      setIsGeneratingFeedback(false);
+      return;
+    }
+
+    if (!bypassCache && clientFeedbackCache.current.has(currentText)) {
+      const cached = clientFeedbackCache.current.get(currentText)!;
+      if (cached && Array.isArray(cached.sentenceBreakdowns) && cached.sentenceBreakdowns.length > 0) {
+        setCorrectionResult(cached);
+        setBreakdowns(cached.sentenceBreakdowns);
+        setFeedbackError(null);
+        setIsGeneratingFeedback(false);
+        return;
+      }
+    }
+
+    setFeedbackError(null);
+    setIsGeneratingFeedback(true);
+
+    try {
+      const response = await fetch('/api/correct', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: initialTitle || 'My English Diary',
+          content: currentText,
+          date,
+          weather: initialWeather,
+          mood: initialMood,
+        }),
+      });
+
+      const data = await readCorrectionResponse(response);
+
+      if (data && Array.isArray(data.sentenceBreakdowns) && data.sentenceBreakdowns.length > 0) {
+        clientFeedbackCache.current.set(currentText, data);
+      }
+
+      setCorrectionResult(data);
+      setBreakdowns(data.sentenceBreakdowns || []);
+      setSavedBreakdownIndices(new Set<number>());
+      setFeedbackError(null);
+    } catch (error) {
+      console.warn('Live diary feedback notice:', error);
+      setFeedbackError(error instanceof Error ? error.message : 'AI 피드백 생성 중 오류가 발생했습니다.');
+    } finally {
+      setIsGeneratingFeedback(false);
+      setForceFeedbackRequest(false);
+    }
+  }, [date, initialTitle, initialWeather, initialMood]);
+
   useEffect(() => {
     const currentText = content.trim();
     if (!currentText) {
@@ -155,15 +210,16 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
       return;
     }
 
-    // Check client-side memory cache first
-    if (clientFeedbackCache.current.has(currentText)) {
+    // Check client-side memory cache first if valid
+    if (!forceFeedbackRequest && clientFeedbackCache.current.has(currentText)) {
       const cached = clientFeedbackCache.current.get(currentText)!;
-      setCorrectionResult(cached);
-      setBreakdowns(cached.sentenceBreakdowns);
-      setFeedbackError(null);
-      setIsGeneratingFeedback(false);
-      if (forceFeedbackRequest) setForceFeedbackRequest(false);
-      return;
+      if (cached && Array.isArray(cached.sentenceBreakdowns) && cached.sentenceBreakdowns.length > 0) {
+        setCorrectionResult(cached);
+        setBreakdowns(cached.sentenceBreakdowns);
+        setFeedbackError(null);
+        setIsGeneratingFeedback(false);
+        return;
+      }
     }
 
     if (
@@ -177,68 +233,28 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
       return;
     }
 
-    // Don't auto-query if text is extremely brief (e.g. single character) unless explicitly requested
-    if (!forceFeedbackRequest && currentText.length < 8) {
+    // Don't auto-query in background while typing if text is very short unless explicitly requested
+    if (!forceFeedbackRequest && currentText.length < 12) {
       setIsGeneratingFeedback(false);
       return;
     }
 
-    const controller = new AbortController();
-    setFeedbackError(null);
-    setIsGeneratingFeedback(true);
-
-    const delayMs = forceFeedbackRequest ? 0 : 1800;
-
-    const timeoutId = window.setTimeout(async () => {
-      try {
-        const response = await fetch('/api/correct', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: initialTitle || 'My English Diary',
-            content: currentText,
-            date,
-            weather: initialWeather,
-            mood: initialMood,
-          }),
-          signal: controller.signal,
-        });
-
-        const data = await readCorrectionResponse(response);
-
-        // Store in cache
-        clientFeedbackCache.current.set(currentText, data);
-
-        setCorrectionResult(data);
-        setBreakdowns(data.sentenceBreakdowns);
-        setSavedBreakdownIndices(new Set<number>());
-        setFeedbackError(null);
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        console.warn('Live diary feedback notice:', error);
-        setFeedbackError(error instanceof Error ? error.message : 'AI 피드백 생성 중 오류가 발생했습니다.');
-      } finally {
-        if (!controller.signal.aborted) {
-          setIsGeneratingFeedback(false);
-          setForceFeedbackRequest(false);
-        }
-      }
+    // Gentle debounce while typing
+    const delayMs = forceFeedbackRequest ? 0 : 2000;
+    const timeoutId = window.setTimeout(() => {
+      executeFeedbackRequest(currentText, forceFeedbackRequest);
     }, delayMs);
 
     return () => {
       window.clearTimeout(timeoutId);
-      controller.abort();
     };
   }, [
     content,
-    date,
-    initialTitle,
     initialContent,
     initialCorrectionResult,
-    initialWeather,
-    initialMood,
     feedbackRetryCount,
     forceFeedbackRequest,
+    executeFeedbackRequest,
   ]);
 
   // Format the selected date as YYYY.MM.DD.
@@ -272,15 +288,17 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
   };
 
   // Trigger AI Feedback (Sparkle button)
-  const handleOpenAIFeedback = async () => {
+  const handleOpenAIFeedback = () => {
     const currentText = content.trim();
     if (!currentText) {
-      showToast('영어 일기를 먼저 작성해 주세요. 🐾');
+      showToast('일기를 먼저 작성해 주세요. 🐾');
       return;
     }
 
-    setForceFeedbackRequest(true);
     setActiveSubView('ai_feedback');
+    if (breakdowns.length === 0 || !clientFeedbackCache.current.has(currentText)) {
+      executeFeedbackRequest(currentText, false);
+    }
   };
 
   const handleUseWritingHint = (starter: string) => {
@@ -386,9 +404,17 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
       }
     });
 
+    // If entire content was replaced or if it still contains Korean characters while full text is ready
+    if (
+      correctionResult?.correctedFullText &&
+      (/[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(updatedContent) || updatedContent === content)
+    ) {
+      updatedContent = correctionResult.correctedFullText;
+    }
+
     setContent(updatedContent);
     setActiveSubView('editor');
-    showToast('원어민 표현이 일기에 적용되었습니다! ✨');
+    showToast('원어민 영어 표현이 일기에 적용되었습니다! ✨');
   };
 
   // Complete & Save Diary into Calendar (DONE button)
@@ -457,8 +483,9 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
         <div className="flex-1 space-y-7 pt-2 pb-24 overflow-y-auto">
           {isGeneratingFeedback ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
-              <Loader2 className="w-6 h-6 animate-spin text-[#7D4C7D]" />
-              <p className="text-xs text-[#7D4C7D]">Analyzing..</p>
+              <Loader2 className="w-7 h-7 animate-spin text-[#7D4C7D]" />
+              <p className="text-sm font-semibold text-[#7D4C7D]">포티가 문장과 표현을 분석 중이에요... 🐾</p>
+              <p className="text-xs text-[#9A7186]">문법 오류와 한국어 작문을 꼼꼼히 확인하고 있어요</p>
             </div>
           ) : feedbackError ? (
             <div className="rounded-2xl bg-purple-50/70 border border-purple-100 px-4 py-4 text-xs leading-relaxed text-[#7D4C7D]">
@@ -467,10 +494,10 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
                 type="button"
                 onClick={() => {
                   setFeedbackError(null);
-                  setForceFeedbackRequest(true);
-                  setFeedbackRetryCount((count) => count + 1);
+                  clientFeedbackCache.current.delete(content.trim());
+                  executeFeedbackRequest(content.trim(), true);
                 }}
-                className="mt-3 rounded-xl bg-[#7D4C7D] px-3.5 py-2 font-semibold text-white hover:bg-[#6E3F6E]"
+                className="mt-3 rounded-xl bg-[#7D4C7D] px-3.5 py-2 font-semibold text-white hover:bg-[#6E3F6E] cursor-pointer"
               >
                 다시 시도
               </button>
@@ -482,11 +509,15 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
                   ✨
                 </div>
                 <h4 className="text-[17px] font-sans font-bold text-[#1F1735] mb-2">
-                  Spot on! Nothing to correct here
+                  {/[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(content)
+                    ? '한국어 일기 분석하기'
+                    : 'Spot on! Nothing to correct here'}
                 </h4>
                 <p className="text-[13px] font-sans text-[#7D4C7D] leading-relaxed max-w-xs">
                   {correctionResult?.overallFeedback?.summary ||
-                    '완벽합니다! 교정할 내용이 없어요.'}
+                    (/[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(content)
+                      ? '한국어 일기를 자연스러운 영어 일기 표현으로 바꿔드릴게요!'
+                      : '완벽합니다! 교정할 내용이 없어요.')}
                 </p>
                 <div className="mt-6 p-4 rounded-2xl bg-white border border-[#EFE8F2] w-full text-left">
                   <div className="text-[11px] font-bold text-[#9872A2] mb-1">내 일기</div>
@@ -494,6 +525,18 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
                     {content}
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    clientFeedbackCache.current.delete(content.trim());
+                    executeFeedbackRequest(content.trim(), true);
+                  }}
+                  className="mt-5 px-5 py-2.5 rounded-xl bg-[#7D4C7D] text-white text-xs font-semibold hover:bg-[#6E3F6E] transition-all cursor-pointer shadow-xs active:scale-95"
+                >
+                  {/[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(content)
+                    ? '영어로 일기 작문하기 🐾'
+                    : '다시 분석하기 🐾'}
+                </button>
               </div>
             ) : (
               <p className="py-16 text-center text-xs text-[#9872A2]">
@@ -503,13 +546,14 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
           ) : (
             breakdowns.map((item, idx) => {
               const isBookmarked = savedBreakdownIndices.has(idx);
+              const isKoreanSentence = /[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(item.original);
               return (
                 <div key={idx} className="space-y-3">
-                  {/* Row 1: ME + Original text + Bookmark on right */}
+                  {/* Row 1: ME (or 원문) + Original text + Bookmark on right */}
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2.5">
                       <span className="bg-black text-white text-[10px] font-sans font-bold px-2 py-0.5 rounded-full shrink-0">
-                        ME
+                        {isKoreanSentence ? '원문 (KR)' : 'ME'}
                       </span>
                       <span className="text-[14px] font-sans text-[#1F1735]">
                         {item.original}
@@ -561,7 +605,9 @@ export const PawtyDiaryEditor: React.FC<PawtyDiaryEditorProps> = ({
             style={{ fontFamily: "'Pretendard', sans-serif" }}
             className="w-full py-4 rounded-2xl bg-[#7D4C7D] hover:bg-[#6E3F6E] active:scale-[0.98] text-white text-center text-[16px] font-pretendard font-semibold shadow-md transition-all cursor-pointer"
           >
-            {breakdowns.length > 0 ? 'Modify using this' : 'Keep my writing'}
+            {breakdowns.length > 0
+              ? (/[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(content) ? '영어로 일기 완성하기' : 'Modify using this')
+              : 'Keep my writing'}
           </button>
         </div>
       </div>
