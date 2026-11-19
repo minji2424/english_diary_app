@@ -2,7 +2,15 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#FAF8F5" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Pawty" />
     <title>NativeInk - Pawty 고양이 영어 일기 & AI 표현 다듬기</title>
     <meta name="description" content="영어로 일기를 쓰고 실시간 원어민 수준 문장 교정과 콩글리시 탈출 팁, 상세 문법 및 관용 표현 피드백을 제공하는 스마트 영어 일기 앱" />
     <meta property="og:title" content="NativeInk - Pawty 고양이 영어 일기 & AI 표현 다듬기" />
@@ -17,5 +25,10 @@
   <body class="bg-[#FAF8F5] text-[#1F1735] antialiased selection:bg-[#EFE3DB] selection:text-[#8D4F2B]">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator && location.hostname !== 'localhost') {
+        window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+      }
+    </script>
   </body>
 </html>
